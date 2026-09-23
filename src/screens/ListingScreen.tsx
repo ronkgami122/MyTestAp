@@ -1,144 +1,195 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   FlatList,
   TextInput,
   TouchableOpacity,
-  Image,
   StyleSheet,
   RefreshControl,
+  ActivityIndicator,
   Modal,
   ScrollView,
 } from 'react-native';
 import { useAppTheme } from '../context/ThemeContext';
-import { generateDummyData, DummyItem } from '../utils/dummyData';
+import PostsService, { Post } from '../services/postsService';
+
+const PAGE_SIZE = 10;
+const TAG_FILTERS = ['All', 'history', 'fiction', 'crime', 'french', 'magical', 'english', 'mystery'];
 
 export const ListingScreen: React.FC = () => {
   const { colors, isDark } = useAppTheme();
 
-  const [items, setItems] = useState<DummyItem[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [totalPosts, setTotalPosts] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('All');
-  const [selectedUser, setSelectedUser] = useState<DummyItem | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const loadData = useCallback(() => {
-    const data = generateDummyData(25);
-    setItems(data);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedTag, setSelectedTag] = useState<string>('All');
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+
+  const searchTimeoutRef = useRef<any>(null);
+
+  // Fetch posts from DummyJSON API via Axios
+  const fetchPosts = useCallback(
+    async (isRefresh = false, query = searchQuery, tag = selectedTag) => {
+      if (isRefresh) {
+        setIsRefreshing(true);
+      } else if (posts.length === 0) {
+        setIsLoading(true);
+      }
+      setErrorMessage(null);
+
+      try {
+        let response;
+        if (query.trim()) {
+          response = await PostsService.searchPosts(query.trim(), PAGE_SIZE, 0);
+        } else if (tag !== 'All') {
+          response = await PostsService.getPostsByTag(tag, PAGE_SIZE, 0);
+        } else {
+          response = await PostsService.getPosts(PAGE_SIZE, 0);
+        }
+
+        setPosts(response.posts);
+        setTotalPosts(response.total);
+      } catch (err: any) {
+        console.error('Failed to fetch posts from DummyJSON:', err);
+        setErrorMessage(err?.message || 'Failed to load posts from DummyJSON API.');
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    },
+    [searchQuery, selectedTag, posts.length],
+  );
+
+  // Initial load
+  useEffect(() => {
+    fetchPosts();
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Handle Search Input with debounce
+  const handleSearchChange = (text: string) => {
+    setSearchQuery(text);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      fetchPosts(false, text, selectedTag);
+    }, 450);
+  };
 
-  const handleRefresh = useCallback(() => {
-    setIsRefreshing(true);
-    setTimeout(() => {
-      loadData();
-      setIsRefreshing(false);
-    }, 600);
-  }, [loadData]);
+  // Handle Tag Selection
+  const handleTagPress = (tag: string) => {
+    setSelectedTag(tag);
+    setSearchQuery('');
+    fetchPosts(false, '', tag);
+  };
 
-  const filteredItems = useMemo(() => {
-    return items.filter(item => {
-      const matchesSearch =
-        searchQuery.trim() === '' ||
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.department.toLowerCase().includes(searchQuery.toLowerCase());
+  // Handle Pagination (Load More)
+  const handleLoadMore = async () => {
+    if (isLoadingMore || isLoading || isRefreshing || posts.length >= totalPosts) {
+      return;
+    }
 
-      const matchesStatus =
-        selectedStatus === 'All' || item.status === selectedStatus;
+    setIsLoadingMore(true);
+    try {
+      let response;
+      const skip = posts.length;
 
-      return matchesSearch && matchesStatus;
-    });
-  }, [items, searchQuery, selectedStatus]);
+      if (searchQuery.trim()) {
+        response = await PostsService.searchPosts(searchQuery.trim(), PAGE_SIZE, skip);
+      } else if (selectedTag !== 'All') {
+        response = await PostsService.getPostsByTag(selectedTag, PAGE_SIZE, skip);
+      } else {
+        response = await PostsService.getPosts(PAGE_SIZE, skip);
+      }
 
-  const getStatusColor = (status: DummyItem['status']) => {
-    switch (status) {
-      case 'Active':
-        return colors.success;
-      case 'Away':
-        return colors.warning;
-      case 'Offline':
-        return colors.danger;
-      default:
-        return colors.textMuted;
+      setPosts(prev => [...prev, ...response.posts]);
+    } catch (err) {
+      console.warn('Failed to load more posts:', err);
+    } finally {
+      setIsLoadingMore(false);
     }
   };
 
-  const getStatusBgColor = (status: DummyItem['status']) => {
-    switch (status) {
-      case 'Active':
-        return isDark ? 'rgba(52, 211, 153, 0.2)' : '#D1FAE5';
-      case 'Away':
-        return isDark ? 'rgba(251, 191, 36, 0.2)' : '#FEF3C7';
-      case 'Offline':
-        return isDark ? 'rgba(248, 113, 113, 0.2)' : '#FEE2E2';
-      default:
-        return colors.surface;
-    }
-  };
-
-  const renderItem = ({ item }: { item: DummyItem }) => {
-    const statusColor = getStatusColor(item.status);
-    const statusBg = getStatusBgColor(item.status);
+  const renderPostItem = ({ item }: { item: Post }) => {
+    const likes = item.reactions?.likes ?? (typeof item.reactions === 'number' ? item.reactions : 0);
+    const dislikes = item.reactions?.dislikes ?? 0;
 
     return (
       <TouchableOpacity
         activeOpacity={0.8}
-        onPress={() => setSelectedUser(item)}
+        onPress={() => setSelectedPost(item)}
         style={[
-          styles.itemCard,
+          styles.postCard,
           {
             backgroundColor: colors.card,
             borderColor: colors.border,
           },
         ]}
       >
-        <View style={styles.cardHeader}>
-          <Image
-            source={{ uri: item.avatar }}
-            style={styles.avatar}
-            defaultSource={require('../assets/logo.jpg')}
-          />
-          <View style={styles.cardInfo}>
-            <View style={styles.nameRow}>
-              <Text style={[styles.nameText, { color: colors.text }]} numberOfLines={1}>
-                {item.name}
-              </Text>
-              <View style={[styles.statusBadge, { backgroundColor: statusBg }]}>
-                <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                <Text style={[styles.statusLabel, { color: statusColor }]}>
-                  {item.status}
-                </Text>
-              </View>
-            </View>
-
-            <Text style={[styles.roleText, { color: colors.primary }]} numberOfLines={1}>
-              {item.role}
-            </Text>
-
-            <Text style={[styles.departmentText, { color: colors.textSecondary }]} numberOfLines={1}>
-              🏢 {item.department} • 📍 {item.city}
-            </Text>
-
-            <Text style={[styles.emailText, { color: colors.textMuted }]} numberOfLines={1}>
-              ✉️ {item.email}
+        {/* Post Top Row: Post ID & Views */}
+        <View style={styles.postTopRow}>
+          <View style={[styles.idBadge, { backgroundColor: colors.primaryLight }]}>
+            <Text style={[styles.idBadgeText, { color: colors.primary }]}>Post #{item.id}</Text>
+          </View>
+          <View style={styles.viewsBadge}>
+            <Text style={[styles.viewsText, { color: colors.textSecondary }]}>
+              👁️ {item.views.toLocaleString()} views
             </Text>
           </View>
         </View>
 
-        <View style={[styles.cardDivider, { backgroundColor: colors.border }]} />
+        {/* Title */}
+        <Text style={[styles.postTitle, { color: colors.text }]} numberOfLines={2}>
+          {item.title}
+        </Text>
 
-        <View style={styles.cardFooter}>
-          <Text style={[styles.joinDateText, { color: colors.textMuted }]}>
-            Joined: {item.joinDate}
+        {/* Body Snippet */}
+        <Text style={[styles.postBody, { color: colors.textSecondary }]} numberOfLines={3}>
+          {item.body}
+        </Text>
+
+        {/* Tags */}
+        <View style={styles.tagsContainer}>
+          {item.tags.map(tag => (
+            <View
+              key={tag}
+              style={[
+                styles.tagChip,
+                { backgroundColor: isDark ? colors.surface : '#EEF2FF' },
+              ]}
+            >
+              <Text style={[styles.tagText, { color: colors.primary }]}>#{tag}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+        {/* Footer: Reactions & Author */}
+        <View style={styles.postFooter}>
+          <View style={styles.reactionsGroup}>
+            <Text style={[styles.reactionPill, { color: colors.success }]}>
+              👍 {likes}
+            </Text>
+            {dislikes > 0 ? (
+              <Text style={[styles.reactionPill, { color: colors.danger }]}>
+                👎 {dislikes}
+              </Text>
+            ) : null}
+          </View>
+
+          <Text style={[styles.authorText, { color: colors.textMuted }]}>
+            Author ID: {item.userId}
           </Text>
-          <Text style={[styles.viewDetailsText, { color: colors.primary }]}>
-            View Details →
+
+          <Text style={[styles.readMoreText, { color: colors.primary }]}>
+            Read More →
           </Text>
         </View>
       </TouchableOpacity>
@@ -147,39 +198,45 @@ export const ListingScreen: React.FC = () => {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Search Bar Header */}
+      {/* Search Header */}
       <View style={[styles.searchSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={[styles.searchInputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
-            placeholder="Search by name, role, email..."
+            placeholder="Search DummyJSON posts by title or keyword..."
             placeholderTextColor={colors.textMuted}
             value={searchQuery}
-            onChangeText={setSearchQuery}
+            onChangeText={handleSearchChange}
             style={[styles.searchInput, { color: colors.text }]}
+            returnKeyType="search"
           />
           {searchQuery ? (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity
+              onPress={() => {
+                setSearchQuery('');
+                fetchPosts(false, '', selectedTag);
+              }}
+            >
               <Text style={[styles.clearSearch, { color: colors.textMuted }]}>✕</Text>
             </TouchableOpacity>
           ) : null}
         </View>
 
-        {/* Filter Chips */}
+        {/* Filter Chips by Tag */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterChipsRow}
+          contentContainerStyle={styles.tagsScroll}
         >
-          {['All', 'Active', 'Away', 'Offline'].map(status => {
-            const isSelected = selectedStatus === status;
+          {TAG_FILTERS.map(tag => {
+            const isSelected = selectedTag === tag;
             return (
               <TouchableOpacity
-                key={status}
+                key={tag}
                 activeOpacity={0.7}
-                onPress={() => setSelectedStatus(status)}
+                onPress={() => handleTagPress(tag)}
                 style={[
-                  styles.filterChip,
+                  styles.filterTagChip,
                   {
                     backgroundColor: isSelected
                       ? colors.primary
@@ -192,14 +249,14 @@ export const ListingScreen: React.FC = () => {
               >
                 <Text
                   style={[
-                    styles.filterChipText,
+                    styles.filterTagText,
                     {
                       color: isSelected ? '#FFFFFF' : colors.textSecondary,
                       fontWeight: isSelected ? '700' : '500',
                     },
                   ]}
                 >
-                  {status}
+                  {tag === 'All' ? 'All Posts' : `#${tag}`}
                 </Text>
               </TouchableOpacity>
             );
@@ -207,55 +264,94 @@ export const ListingScreen: React.FC = () => {
         </ScrollView>
       </View>
 
-      {/* Stats Counter */}
-      <View style={styles.statsBar}>
-        <Text style={[styles.statsText, { color: colors.textSecondary }]}>
-          Showing <Text style={{ fontWeight: '700', color: colors.text }}>{filteredItems.length}</Text> dummy records from <Text style={{ color: colors.primary, fontWeight: '700' }}>@faker-js/faker</Text>
+      {/* Info Bar */}
+      <View style={styles.infoBar}>
+        <Text style={[styles.infoText, { color: colors.textSecondary }]}>
+          API: <Text style={{ color: colors.primary, fontWeight: '700' }}>dummyjson.com/posts</Text>
+          {totalPosts > 0 ? ` • ${posts.length} of ${totalPosts} loaded` : ''}
         </Text>
       </View>
 
-      {/* Dummy List */}
-      <FlatList
-        data={filteredItems}
-        keyExtractor={item => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            colors={[colors.primary]}
-            tintColor={colors.primary}
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={{ fontSize: 40, marginBottom: 12 }}>🔎</Text>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Results Found</Text>
-            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-              No users match your query "{searchQuery}".
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                setSearchQuery('');
-                setSelectedStatus('All');
-              }}
-              style={[styles.resetSearchButton, { backgroundColor: colors.primary }]}
-            >
-              <Text style={styles.resetSearchText}>Reset Filters</Text>
-            </TouchableOpacity>
-          </View>
-        }
-      />
+      {/* Main Content / Loading / Error State */}
+      {isLoading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingLabel, { color: colors.textSecondary }]}>
+            Fetching live posts via Axios...
+          </Text>
+        </View>
+      ) : errorMessage && posts.length === 0 ? (
+        <View style={styles.centerContainer}>
+          <Text style={{ fontSize: 36, marginBottom: 8 }}>⚠️</Text>
+          <Text style={[styles.errorTitle, { color: colors.text }]}>Unable to Load Posts</Text>
+          <Text style={[styles.errorSubtitle, { color: colors.textSecondary }]}>{errorMessage}</Text>
+          <TouchableOpacity
+            onPress={() => fetchPosts(true)}
+            style={[styles.retryButton, { backgroundColor: colors.primary }]}
+          >
+            <Text style={styles.retryButtonText}>Retry Request</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={posts}
+          keyExtractor={item => String(item.id)}
+          renderItem={renderPostItem}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={() => fetchPosts(true)}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            isLoadingMore ? (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.footerText, { color: colors.textMuted }]}>
+                  Loading more posts...
+                </Text>
+              </View>
+            ) : posts.length >= totalPosts && totalPosts > 0 ? (
+              <Text style={[styles.endReachedText, { color: colors.textMuted }]}>
+                ✓ All {totalPosts} posts loaded from DummyJSON
+              </Text>
+            ) : null
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={{ fontSize: 40, marginBottom: 10 }}>🔍</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Posts Found</Text>
+              <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                No DummyJSON posts matched your query "{searchQuery}".
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchQuery('');
+                  setSelectedTag('All');
+                  fetchPosts(false, '', 'All');
+                }}
+                style={[styles.retryButton, { backgroundColor: colors.primary, marginTop: 16 }]}
+              >
+                <Text style={styles.retryButtonText}>Clear Search & Reset</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      )}
 
-      {/* User Details Modal */}
-      {selectedUser ? (
+      {/* Post Details Modal */}
+      {selectedPost ? (
         <Modal
-          visible={!!selectedUser}
+          visible={!!selectedPost}
           transparent
           animationType="slide"
-          onRequestClose={() => setSelectedUser(null)}
+          onRequestClose={() => setSelectedPost(null)}
         >
           <View style={styles.modalOverlay}>
             <View
@@ -265,77 +361,77 @@ export const ListingScreen: React.FC = () => {
               ]}
             >
               <View style={styles.modalTopBar}>
-                <Text style={[styles.modalHeading, { color: colors.text }]}>Profile Details</Text>
-                <TouchableOpacity onPress={() => setSelectedUser(null)}>
+                <View style={[styles.idBadge, { backgroundColor: colors.primaryLight }]}>
+                  <Text style={[styles.idBadgeText, { color: colors.primary }]}>
+                    Post #{selectedPost.id}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setSelectedPost(null)}>
                   <Text style={[styles.closeModalText, { color: colors.textMuted }]}>✕</Text>
                 </TouchableOpacity>
               </View>
 
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={styles.modalHero}>
-                  <Image
-                    source={{ uri: selectedUser.avatar }}
-                    style={styles.modalAvatar}
-                  />
-                  <Text style={[styles.modalName, { color: colors.text }]}>{selectedUser.name}</Text>
-                  <Text style={[styles.modalRole, { color: colors.primary }]}>{selectedUser.role}</Text>
-                  <View
-                    style={[
-                      styles.modalStatusPill,
-                      { backgroundColor: getStatusBgColor(selectedUser.status) },
-                    ]}
-                  >
+              <ScrollView showsVerticalScrollIndicator={false} style={styles.modalScroll}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>
+                  {selectedPost.title}
+                </Text>
+
+                <View style={styles.modalMetaRow}>
+                  <Text style={[styles.modalMetaText, { color: colors.textSecondary }]}>
+                    👤 Author ID: {selectedPost.userId}
+                  </Text>
+                  <Text style={[styles.modalMetaText, { color: colors.textSecondary }]}>
+                    👁️ {selectedPost.views.toLocaleString()} views
+                  </Text>
+                </View>
+
+                {/* Tags */}
+                <View style={styles.modalTagsRow}>
+                  {selectedPost.tags.map(tag => (
                     <View
+                      key={tag}
                       style={[
-                        styles.statusDot,
-                        { backgroundColor: getStatusColor(selectedUser.status) },
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.statusLabel,
-                        { color: getStatusColor(selectedUser.status) },
+                        styles.tagChip,
+                        { backgroundColor: isDark ? colors.surface : '#EEF2FF' },
                       ]}
                     >
-                      {selectedUser.status} Status
-                    </Text>
-                  </View>
+                      <Text style={[styles.tagText, { color: colors.primary }]}>#{tag}</Text>
+                    </View>
+                  ))}
                 </View>
 
-                <View style={[styles.modalDetailsBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={styles.modalDetailRow}>
-                    <Text style={[styles.modalDetailLabel, { color: colors.textSecondary }]}>Email</Text>
-                    <Text style={[styles.modalDetailValue, { color: colors.text }]}>{selectedUser.email}</Text>
-                  </View>
-                  <View style={styles.modalDetailRow}>
-                    <Text style={[styles.modalDetailLabel, { color: colors.textSecondary }]}>Phone</Text>
-                    <Text style={[styles.modalDetailValue, { color: colors.text }]}>{selectedUser.phone}</Text>
-                  </View>
-                  <View style={styles.modalDetailRow}>
-                    <Text style={[styles.modalDetailLabel, { color: colors.textSecondary }]}>Department</Text>
-                    <Text style={[styles.modalDetailValue, { color: colors.text }]}>{selectedUser.department}</Text>
-                  </View>
-                  <View style={styles.modalDetailRow}>
-                    <Text style={[styles.modalDetailLabel, { color: colors.textSecondary }]}>Location</Text>
-                    <Text style={[styles.modalDetailValue, { color: colors.text }]}>{selectedUser.city}, {selectedUser.country}</Text>
-                  </View>
-                  <View style={styles.modalDetailRow}>
-                    <Text style={[styles.modalDetailLabel, { color: colors.textSecondary }]}>Joined</Text>
-                    <Text style={[styles.modalDetailValue, { color: colors.text }]}>{selectedUser.joinDate}</Text>
-                  </View>
-                </View>
+                {/* Full Body */}
+                <Text style={[styles.modalBodyText, { color: colors.text }]}>
+                  {selectedPost.body}
+                </Text>
 
-                <View style={styles.bioSection}>
-                  <Text style={[styles.bioTitle, { color: colors.textSecondary }]}>Biography</Text>
-                  <Text style={[styles.bioBody, { color: colors.text }]}>{selectedUser.bio}</Text>
+                {/* Reactions Card */}
+                <View style={[styles.reactionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Text style={[styles.reactionsHeading, { color: colors.text }]}>Community Reactions</Text>
+                  <View style={styles.reactionsDetailRow}>
+                    <View style={styles.reactionStat}>
+                      <Text style={{ fontSize: 24 }}>👍</Text>
+                      <Text style={[styles.reactionCount, { color: colors.success }]}>
+                        {selectedPost.reactions?.likes ?? 0}
+                      </Text>
+                      <Text style={[styles.reactionLabel, { color: colors.textSecondary }]}>Likes</Text>
+                    </View>
+                    <View style={styles.reactionStat}>
+                      <Text style={{ fontSize: 24 }}>👎</Text>
+                      <Text style={[styles.reactionCount, { color: colors.danger }]}>
+                        {selectedPost.reactions?.dislikes ?? 0}
+                      </Text>
+                      <Text style={[styles.reactionLabel, { color: colors.textSecondary }]}>Dislikes</Text>
+                    </View>
+                  </View>
                 </View>
 
                 <TouchableOpacity
                   activeOpacity={0.8}
-                  onPress={() => setSelectedUser(null)}
+                  onPress={() => setSelectedPost(null)}
                   style={[styles.closeModalButton, { backgroundColor: colors.primary }]}
                 >
-                  <Text style={styles.closeModalButtonText}>Close Profile</Text>
+                  <Text style={styles.closeModalButtonText}>Close Article</Text>
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -359,7 +455,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 2,
   },
-  searchInputWrapper: {
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     height: 46,
@@ -379,36 +475,36 @@ const styles = StyleSheet.create({
     fontSize: 16,
     padding: 4,
   },
-  filterChipsRow: {
+  tagsScroll: {
     flexDirection: 'row',
     gap: 8,
     marginTop: 12,
   },
-  filterChip: {
+  filterTagChip: {
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
   },
-  filterChipText: {
+  filterTagText: {
     fontSize: 12,
   },
-  statsBar: {
+  infoBar: {
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
-  statsText: {
+  infoText: {
     fontSize: 12,
   },
   listContent: {
     padding: 16,
     paddingTop: 4,
-    paddingBottom: 24,
+    paddingBottom: 28,
     gap: 12,
   },
-  itemCard: {
+  postCard: {
     borderRadius: 14,
-    padding: 14,
+    padding: 16,
     borderWidth: 1,
     elevation: 2,
     shadowColor: '#000',
@@ -416,80 +512,128 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 4,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#E2E8F0',
-  },
-  cardInfo: {
-    flex: 1,
-  },
-  nameRow: {
+  postTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 8,
   },
-  nameText: {
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
+  idBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 12,
-    marginLeft: 6,
+    borderRadius: 8,
   },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusLabel: {
+  idBadgeText: {
     fontSize: 11,
     fontWeight: '700',
   },
-  roleText: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: 2,
+  viewsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  departmentText: {
+  viewsText: {
     fontSize: 12,
-    marginTop: 3,
+    fontWeight: '500',
   },
-  emailText: {
+  postTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 22,
+    marginBottom: 6,
+  },
+  postBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 10,
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  tagChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  tagText: {
     fontSize: 11,
-    marginTop: 2,
+    fontWeight: '600',
   },
-  cardDivider: {
+  divider: {
     height: 1,
     marginVertical: 10,
   },
-  cardFooter: {
+  postFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  joinDateText: {
+  reactionsGroup: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  reactionPill: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  authorText: {
     fontSize: 11,
   },
-  viewDetailsText: {
-    fontSize: 12,
+  readMoreText: {
+    fontSize: 13,
     fontWeight: '700',
+  },
+  centerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  loadingLabel: {
+    marginTop: 12,
+    fontSize: 14,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  errorSubtitle: {
+    fontSize: 14,
+    marginTop: 4,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  footerLoader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+  },
+  footerText: {
+    fontSize: 13,
+  },
+  endReachedText: {
+    textAlign: 'center',
+    paddingVertical: 16,
+    fontSize: 12,
+    fontStyle: 'italic',
   },
   emptyContainer: {
     alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 20,
+    paddingVertical: 50,
   },
   emptyTitle: {
     fontSize: 18,
@@ -497,19 +641,8 @@ const styles = StyleSheet.create({
   },
   emptySubtitle: {
     fontSize: 14,
-    marginTop: 6,
+    marginTop: 4,
     textAlign: 'center',
-  },
-  resetSearchButton: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  resetSearchText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 14,
   },
   modalOverlay: {
     flex: 1,
@@ -530,81 +663,70 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
   },
-  modalHeading: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
   closeModalText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     padding: 4,
   },
-  modalHero: {
-    alignItems: 'center',
-    paddingVertical: 18,
+  modalScroll: {
+    paddingTop: 14,
   },
-  modalAvatar: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    marginBottom: 10,
-  },
-  modalName: {
+  modalTitle: {
     fontSize: 20,
     fontWeight: '800',
+    lineHeight: 26,
+    marginBottom: 10,
   },
-  modalRole: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  modalStatusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 14,
-    marginTop: 8,
-  },
-  modalDetailsBox: {
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    gap: 10,
-  },
-  modalDetailRow: {
+  modalMetaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  modalDetailLabel: {
+  modalMetaText: {
     fontSize: 13,
-    fontWeight: '600',
   },
-  modalDetailValue: {
-    fontSize: 13,
-    fontWeight: '500',
+  modalTagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 16,
   },
-  bioSection: {
-    marginTop: 16,
-    padding: 12,
+  modalBodyText: {
+    fontSize: 15,
+    lineHeight: 24,
+    marginBottom: 20,
   },
-  bioTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    marginBottom: 6,
+  reactionsCard: {
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    marginBottom: 20,
   },
-  bioBody: {
+  reactionsHeading: {
     fontSize: 14,
-    lineHeight: 20,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  reactionsDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  reactionStat: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  reactionCount: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  reactionLabel: {
+    fontSize: 12,
   },
   closeModalButton: {
     height: 50,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
     marginBottom: 20,
   },
   closeModalButtonText: {
