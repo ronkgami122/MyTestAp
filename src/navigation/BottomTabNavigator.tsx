@@ -1,6 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import HomeScreen from '../screens/HomeScreen';
 import ListingScreen from '../screens/ListingScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -16,7 +17,7 @@ export type RootTabParamList = {
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
 export const BottomTabNavigator: React.FC = () => {
-  const { colors, isDark } = useAppTheme();
+  const { colors } = useAppTheme();
 
   return (
     <Tab.Navigator
@@ -61,7 +62,11 @@ export const BottomTabNavigator: React.FC = () => {
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, focused }) => (
             <View style={styles.iconContainer}>
-              <Text style={{ fontSize: focused ? 22 : 18 }}>🏠</Text>
+              <Ionicons
+                name={focused ? 'home' : 'home-outline'}
+                size={22}
+                color={color}
+              />
             </View>
           ),
         }}
@@ -75,7 +80,11 @@ export const BottomTabNavigator: React.FC = () => {
           tabBarLabel: 'Listing',
           tabBarIcon: ({ color, focused }) => (
             <View style={styles.iconContainer}>
-              <Text style={{ fontSize: focused ? 22 : 18 }}>📋</Text>
+              <Ionicons
+                name={focused ? 'document-text' : 'document-text-outline'}
+                size={22}
+                color={color}
+              />
             </View>
           ),
         }}
@@ -89,7 +98,11 @@ export const BottomTabNavigator: React.FC = () => {
           tabBarLabel: 'Settings',
           tabBarIcon: ({ color, focused }) => (
             <View style={styles.iconContainer}>
-              <Text style={{ fontSize: focused ? 22 : 18 }}>⚙️</Text>
+              <Ionicons
+                name={focused ? 'settings' : 'settings-outline'}
+                size={22}
+                color={color}
+              />
             </View>
           ),
         }}

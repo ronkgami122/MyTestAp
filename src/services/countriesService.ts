@@ -17,31 +17,56 @@ export interface GetCountriesParams {
   sort?: string;
   limit?: number;
   offset?: number;
+  search?: string;
 }
 
 const BASE_URL = 'https://countries.dev';
 
 export const CountriesService = {
   /**
-   * Fetch countries from countries.dev API using Axios / ApiClient
-   * Default params fetch country name, capital, flag emoji, dial code, and alpha2Code
+   * Fetch countries from countries.dev API using Axios / ApiClient.
+   * Supports pagination (limit & offset) and debounced search via API.
    */
   async getCountries(params: GetCountriesParams = {}): Promise<ApiCountry[]> {
-    const defaultParams: GetCountriesParams = {
-      fields: 'name,capital,flag,alpha2Code,callingCodes,population,region',
-      full: true,
-      sort: 'name',
-      limit: 60,
-      offset: 0,
-      ...params,
-    };
+    const { search, limit = 20, offset = 0, sort = 'name', ...rest } = params;
+    const trimmedSearch = search?.trim() || '';
 
     try {
-      const response = await ApiClient.get<ApiCountry[]>(`${BASE_URL}/countries`, defaultParams);
+      let rawData: any[] = [];
 
-      if (Array.isArray(response) && response.length > 0) {
-        // Normalize countries to ensure valid display values
-        return response
+      if (trimmedSearch) {
+        // Query search by name API: /name/:name
+        try {
+          const searchResponse = await ApiClient.get<any[]>(
+            `${BASE_URL}/name/${encodeURIComponent(trimmedSearch)}`,
+            { limit, offset, sort, ...rest }
+          );
+          if (Array.isArray(searchResponse)) {
+            rawData = searchResponse;
+          }
+        } catch (searchError: any) {
+          if (searchError?.statusCode === 404) {
+            // countries.dev returns 404 if no countries match the search query
+            return [];
+          }
+          throw searchError;
+        }
+      } else {
+        // Query paginated list of countries
+        const response = await ApiClient.get<any[]>(`${BASE_URL}/countries`, {
+          limit,
+          offset,
+          sort,
+          fields: 'name,capital,flag,alpha2Code,callingCodes,population,region',
+          ...rest,
+        });
+        if (Array.isArray(response)) {
+          rawData = response;
+        }
+      }
+
+      if (Array.isArray(rawData) && rawData.length > 0) {
+        const normalized: ApiCountry[] = rawData
           .filter(c => c && c.name)
           .map(c => {
             const rawCalling = Array.isArray(c.callingCodes) && c.callingCodes.length > 0 ? c.callingCodes : ['1'];
@@ -57,41 +82,20 @@ export const CountriesService = {
               region: c.region || 'Global',
             };
           });
+
+        // If search returned the full result set without slicing on the server, slice it by offset & limit
+        if (trimmedSearch && normalized.length > limit) {
+          return normalized.slice(offset, offset + limit);
+        }
+
+        return normalized;
       }
 
-      return CountriesService.getFallbackCountries();
+      return [];
     } catch (error) {
-      console.warn('Countries API error, using structured fallback:', error);
-      return CountriesService.getFallbackCountries();
+      console.warn('Countries API error:', error);
+      throw error;
     }
-  },
-
-  /**
-   * Reliable fallback list in case countries.dev is offline or rate limited
-   */
-  getFallbackCountries(): ApiCountry[] {
-    return [
-      { name: 'United States', flag: '🇺🇸', capital: 'Washington, D.C.', alpha2Code: 'US', callingCodes: ['1'], region: 'Americas' },
-      { name: 'United Kingdom', flag: '🇬🇧', capital: 'London', alpha2Code: 'GB', callingCodes: ['44'], region: 'Europe' },
-      { name: 'India', flag: '🇮🇳', capital: 'New Delhi', alpha2Code: 'IN', callingCodes: ['91'], region: 'Asia' },
-      { name: 'Canada', flag: '🇨🇦', capital: 'Ottawa', alpha2Code: 'CA', callingCodes: ['1'], region: 'Americas' },
-      { name: 'Australia', flag: '🇦🇺', capital: 'Canberra', alpha2Code: 'AU', callingCodes: ['61'], region: 'Oceania' },
-      { name: 'Germany', flag: '🇩🇪', capital: 'Berlin', alpha2Code: 'DE', callingCodes: ['49'], region: 'Europe' },
-      { name: 'France', flag: '🇫🇷', capital: 'Paris', alpha2Code: 'FR', callingCodes: ['33'], region: 'Europe' },
-      { name: 'Japan', flag: '🇯🇵', capital: 'Tokyo', alpha2Code: 'JP', callingCodes: ['81'], region: 'Asia' },
-      { name: 'Singapore', flag: '🇸🇬', capital: 'Singapore', alpha2Code: 'SG', callingCodes: ['65'], region: 'Asia' },
-      { name: 'United Arab Emirates', flag: '🇦🇪', capital: 'Abu Dhabi', alpha2Code: 'AE', callingCodes: ['971'], region: 'Asia' },
-      { name: 'Brazil', flag: '🇧🇷', capital: 'Brasília', alpha2Code: 'BR', callingCodes: ['55'], region: 'Americas' },
-      { name: 'Netherlands', flag: '🇳🇱', capital: 'Amsterdam', alpha2Code: 'NL', callingCodes: ['31'], region: 'Europe' },
-      { name: 'Switzerland', flag: '🇨🇭', capital: 'Bern', alpha2Code: 'CH', callingCodes: ['41'], region: 'Europe' },
-      { name: 'Spain', flag: '🇪🇸', capital: 'Madrid', alpha2Code: 'ES', callingCodes: ['34'], region: 'Europe' },
-      { name: 'Italy', flag: '🇮🇹', capital: 'Rome', alpha2Code: 'IT', callingCodes: ['39'], region: 'Europe' },
-      { name: 'South Korea', flag: '🇰🇷', capital: 'Seoul', alpha2Code: 'KR', callingCodes: ['82'], region: 'Asia' },
-      { name: 'Mexico', flag: '🇲🇽', capital: 'Mexico City', alpha2Code: 'MX', callingCodes: ['52'], region: 'Americas' },
-      { name: 'New Zealand', flag: '🇳🇿', capital: 'Wellington', alpha2Code: 'NZ', callingCodes: ['64'], region: 'Oceania' },
-      { name: 'Sweden', flag: '🇸🇪', capital: 'Stockholm', alpha2Code: 'SE', callingCodes: ['46'], region: 'Europe' },
-      { name: 'South Africa', flag: '🇿🇦', capital: 'Pretoria', alpha2Code: 'ZA', callingCodes: ['27'], region: 'Africa' },
-    ];
   },
 };
 
