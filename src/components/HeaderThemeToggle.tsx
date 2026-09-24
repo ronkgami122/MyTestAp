@@ -1,5 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useAppTheme } from '../context/ThemeContext';
 
 export const HeaderThemeToggle: React.FC = () => {
@@ -20,7 +21,11 @@ export const HeaderThemeToggle: React.FC = () => {
       ]}
     >
       <View style={styles.content}>
-        <Text style={styles.icon}>{isDark ? '🌙' : '☀️'}</Text>
+        <Ionicons
+          name={isDark ? 'moon' : 'sunny'}
+          size={15}
+          color={isDark ? '#FBBF24' : '#F59E0B'}
+        />
         <Text
           style={[
             styles.label,
@@ -36,9 +41,9 @@ export const HeaderThemeToggle: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 100,
     borderWidth: 1,
     marginRight: 16,
     elevation: 2,
@@ -52,9 +57,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  icon: {
-    fontSize: 14,
-  },
   label: {
     fontSize: 12,
     fontWeight: '700',
@@ -63,3 +65,4 @@ const styles = StyleSheet.create({
 });
 
 export default HeaderThemeToggle;
+

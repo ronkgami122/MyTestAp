@@ -8,6 +8,7 @@ import {
   ScrollView,
   Platform,
 } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useAppTheme } from '../context/ThemeContext';
 
 interface CustomDatePickerProps {
@@ -87,7 +88,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
           },
         ]}
       >
-        <Text style={styles.icon}>📅</Text>
+        <Ionicons name="calendar-outline" size={18} color={colors.primary} style={styles.icon} />
         <Text
           style={[
             styles.inputText,
@@ -98,7 +99,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
         >
           {value ? formatDateDisplay(value) : placeholder}
         </Text>
-        <Text style={[styles.chevron, { color: colors.textMuted }]}>▼</Text>
+        <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
       </TouchableOpacity>
 
       {error ? (
@@ -123,9 +124,10 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
                 Select Birthdate
               </Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Text style={[styles.modalCancel, { color: colors.textMuted }]}>Cancel</Text>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
+
 
             <View style={styles.columnsContainer}>
               {/* Day Column */}
@@ -224,7 +226,10 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
               onPress={handleConfirm}
               style={[styles.confirmButton, { backgroundColor: colors.primary }]}
             >
-              <Text style={styles.confirmText}>Confirm Date</Text>
+              <View style={styles.confirmInner}>
+                <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.confirmText}>Confirm Date</Text>
+              </View>
             </TouchableOpacity>
           </View>
         </View>
@@ -251,16 +256,11 @@ const styles = StyleSheet.create({
     height: 52,
   },
   icon: {
-    fontSize: 18,
     marginRight: 10,
   },
   inputText: {
     flex: 1,
     fontSize: 15,
-  },
-  chevron: {
-    fontSize: 10,
-    marginLeft: 6,
   },
   errorText: {
     fontSize: 12,
@@ -292,10 +292,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  modalCancel: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
   columnsContainer: {
     flexDirection: 'row',
     height: 200,
@@ -317,7 +313,7 @@ const styles = StyleSheet.create({
   optionItem: {
     paddingVertical: 10,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 100,
     marginVertical: 2,
   },
   optionText: {
@@ -326,10 +322,15 @@ const styles = StyleSheet.create({
   confirmButton: {
     marginTop: 20,
     height: 50,
-    borderRadius: 12,
+    borderRadius: 100,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 3,
+  },
+  confirmInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   confirmText: {
     color: '#FFFFFF',
@@ -339,3 +340,4 @@ const styles = StyleSheet.create({
 });
 
 export default CustomDatePicker;
+
